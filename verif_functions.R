@@ -4,28 +4,31 @@ library(zoo)
 library(tibble)
 library(dplyr)
 
-## working with output from `read_file` for now
-to_data_frame <- function(fcst, obs) {
-  tibble::tibble(
-    obs = as.vector(obs), 
-    fcst = t(matrix(fcst, nrow(fcst)))
-  )
-}
 
-compute_scores <- function(df, list_of_functions = NULL) {
+compute_scores <- function(file, obs, list_of_functions = NULL) {
+  message(paste0("Compute scores on ", basename(file)))
   if (is.null(list_of_functions)) {
     list_of_functions <- list(
       mn = function(ens, obs) rowMeans(ens),
-      sd = function(ens, obs) apply(ens, 1, sd),
-      crps = function(ens, obs) SpecsVerification::EnsCrps(ens, obs)
+      sd = function(ens, obs) sqrt(rowSums((ens - rowMeans(ens))**2) / (ncol(ens) - 1)),
+      crps = function(ens, obs) SpecsVerification::EnsCrps(ens, obs),
+      rank = function(ens, obs) rowSums(ens < obs)
     )
   }
   
+  df <- read_file(file) %>%
+    dplyr::left_join(obs, by = c("step", "time", "station_id"))
   for (nn in names(list_of_functions)) {
-    message(paste0("Computing ", nn))
+    message(paste0("  computing ", nn))
     df[[nn]] <- list_of_functions[[nn]](df$fcst, df$obs)
   }
-  df
+  df %>%
+    dplyr::select(-fcst) %>%
+    dplyr::mutate(
+      source = basename(file) %>%
+        gsub(".*ESSD.benchmark_", "", .) %>%
+        gsub(".nc", "", .)
+    )
 }
 
 

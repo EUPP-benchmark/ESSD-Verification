@@ -1,6 +1,9 @@
 #load the needed libraries for importing nc files
 library(ncdf4)
 library(ncdf4.helpers)
+library(dplyr)
+library(tibble)
+library(tidync)
 
 #Path to the data, no need to follow same approach
 read_data_from_path <- function(path='/Users/aitorrent/Desktop/input/') {
@@ -48,13 +51,47 @@ read_fc <- function(file = "ESSD_benchmark_test_data_forecasts.nc",
   )
 }
 
-# there is quite some diversity in forecast files
-# therefore we could resort to 'assuming' that dimensions
-# are in the correct order
+## function to read forecast files with minimum sanity checks
 read_file <- function(file, varname = "t2m") {
-  nc <- ncdf4::nc_open(file)
-  on.exit(ncdf4::nc_close(nc))
-  ncvar_get(nc, varname)
+  ff <- tidync::tidync(file, varname) %>% 
+    tidync::hyper_tbl_cube()
+  ## rename dimensions if necessary
+  names(ff$dims) <- names(ff$dims) %>%
+    gsub("forecast_reference_time", "time", .) %>%
+    gsub("forecast_lead_time", "step", .) %>%
+    gsub("percentile", "number", .)
+  ## overwrite time and step dimensions (dirty hack)
+  ff$dims$time <- as.POSIXct("2017-01-01", tz = "UTC") + 
+    as.difftime(seq_along(ff$dims$time) - 1, units = 'days')
+  if (max(ff$dims$step) <= 21) {
+    ff$dims$step <- seq(0, by = 6, length.out = length(ff$dims$step))
+  }
+  if (max(ff$dims$station_id) <= 229) {
+    ff$dims$station_id <- stations$station_id[ff$dims$station_id]
+  }
+  ## drop the number dimension and convert to data.frame 
+  ## with fcst as matrix column
+  out <- expand.grid(ff$dims[setdiff(names(ff$dims), "number")]) %>%
+    tibble::as_tibble()
+  dimnames(ff$mets[[varname]]) <- ff$dims
+  out$fcst <- ff$mets[[varname]] %>%
+    aperm(c(names(out), "number")) %>%
+    matrix(ncol = length(ff$dims$number))
+  out
 }
 
 
+## read observations
+obs <- obsfile %>% 
+  tidync::tidync("t2m") %>%
+  tidync::hyper_tibble(na.rm = FALSE) %>%
+  dplyr::mutate(
+    time = as.POSIXct("1970-01-01", tz = 'UTC') + 
+      as.difftime(time, units = "secs")
+  ) %>%
+  dplyr::rename(obs = t2m)
+
+## read station metadata
+stations <- obsfile %>%
+  tidync::tidync("D0") %>% 
+  tidync::hyper_tibble(na.rm = FALSE)
