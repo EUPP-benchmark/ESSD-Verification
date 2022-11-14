@@ -1,5 +1,33 @@
 library(verification)
+library(SpecsVerification)
 library(zoo)
+library(tibble)
+library(dplyr)
+
+## working with output from `read_file` for now
+to_data_frame <- function(fcst, obs) {
+  tibble::tibble(
+    obs = as.vector(obs), 
+    fcst = t(matrix(fcst, nrow(fcst)))
+  )
+}
+
+compute_scores <- function(df, list_of_functions = NULL) {
+  if (is.null(list_of_functions)) {
+    list_of_functions <- list(
+      mn = function(ens, obs) rowMeans(ens),
+      sd = function(ens, obs) apply(ens, 1, sd),
+      crps = function(ens, obs) SpecsVerification::EnsCrps(ens, obs)
+    )
+  }
+  
+  for (nn in names(list_of_functions)) {
+    message(paste0("Computing ", nn))
+    df[[nn]] <- list_of_functions[[nn]](df$fcst, df$obs)
+  }
+  df
+}
+
 
 verif_for_st_lt <- function(all_data) {
   
@@ -21,7 +49,7 @@ verif_for_st_lt <- function(all_data) {
       obs <- cbind(all_data$list_obs$fctime_obs_test, lt, st, obs)
       obs <- zoo(obs, time)
       colnames(obs) <- c('init', 'lt', 'stat', 'obs')
-      
+      # 
       fc <- all_data$list_fc$data_fc_test[, which(all_data$list_fc$lt_fc_test == lt), , which(all_data$list_fc$station_id_fc_test == st)]
       ens.mu <- apply(fc, 2, mean)
       ens.md <- apply(fc, 2, median)
