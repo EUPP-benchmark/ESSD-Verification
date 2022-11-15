@@ -35,7 +35,7 @@ obsfile <- list.files(path, "observations.nc", full.names = TRUE)
 # exclude ZAMG v1.0 from being assessed due to wrong data format
 fcfiles <- setdiff(
   list.files(path, ".nc$", full.names = TRUE), 
-  c(obsfile, "1_ESSD-benchmark_ZAMG_EMOS-v1.0.nc")
+  c(obsfile, paste(path, "1_ESSD-benchmark_ZAMG_EMOS-v1.0.nc", sep = "/"))
 )
 
 ## read observations
