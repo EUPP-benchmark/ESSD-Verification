@@ -53,20 +53,37 @@ read_fc <- function(file = "ESSD_benchmark_test_data_forecasts.nc",
 
 ## function to read forecast files with minimum sanity checks
 read_file <- function(file, varname = "t2m") {
+  nc <- ncdf4::nc_open(file)
+  on.exit(ncdf4::nc_close(nc))
+  
+  ## read data
   ff <- tidync::tidync(file, varname) %>% 
     tidync::hyper_tbl_cube()
+  
   ## rename dimensions if necessary
   names(ff$dims) <- names(ff$dims) %>%
     gsub("forecast_reference_time", "time", .) %>%
     gsub("forecast_lead_time", "step", .) %>%
     gsub("percentile", "number", .)
-  ## overwrite time and step dimensions (dirty hack)
-  ff$dims$time <- as.POSIXct("2017-01-01", tz = "UTC") + 
-    as.difftime(seq_along(ff$dims$time) - 1, units = 'days')
+
+  ## parse time
+  tdim <- grep("time", names(nc$dim), value = TRUE) %>% 
+    setdiff("forecast_lead_time")
+  tunits <- nc$dim[[tdim]]$units
+  if (tunits == "") {
+    warning(paste0("dimension `time` in ", basename(file), " is not properly specified"))
+    ff$dims$time <- as.POSIXct("2017-01-01", tz = "UTC") + 
+      as.difftime(seq_along(ff$dims$time) - 1, units = 'days')
+  } else {
+    ff$dims$time <- as.POSIXct(gsub(".*since ", "", tunits), tz = "UTC") + 
+      as.difftime(ff$dims$time, units = paste0(substr(tunits, 1, 3), "s"))
+  }
   if (max(ff$dims$step) <= 21) {
+    warning(paste0("dimension `step` in ", basename(file), " is not properly specified"))
     ff$dims$step <- seq(0, by = 6, length.out = length(ff$dims$step))
   }
   if (max(ff$dims$station_id) <= 229) {
+    warning(paste0("dimension `station_id` in ", basename(file), " is not properly specified"))
     ff$dims$station_id <- stations$station_id[ff$dims$station_id]
   }
   ## drop the number dimension and convert to data.frame 
@@ -79,19 +96,3 @@ read_file <- function(file, varname = "t2m") {
     matrix(ncol = length(ff$dims$number))
   out
 }
-
-
-## read observations
-obs <- obsfile %>% 
-  tidync::tidync("t2m") %>%
-  tidync::hyper_tibble(na.rm = FALSE) %>%
-  dplyr::mutate(
-    time = as.POSIXct("1970-01-01", tz = 'UTC') + 
-      as.difftime(time, units = "secs")
-  ) %>%
-  dplyr::rename(obs = t2m)
-
-## read station metadata
-stations <- obsfile %>%
-  tidync::tidync("D0") %>% 
-  tidync::hyper_tibble(na.rm = FALSE)

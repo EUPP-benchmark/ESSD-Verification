@@ -1,0 +1,180 @@
+---
+title: "Benchmark for ESSD"
+author: "EUMETNET verification team"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+This is an attempt at automatically installing dependencies.
+A better integrated way (e.g. `ESSD-verification` as a package) may be implemented at a later stage.
+
+```{r libraries}
+dependencies <- c('dplyr', 'ncdf4', 'ncdf4.helpers', 'tibble', 'tidync', 'ggplot2', 'tidyr', 'SpecsVerification', 'verification', 'zoo', 'rmarkdown', 'knitr')
+for (pkg in dependencies) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg)
+  }
+}
+
+source("read_data.R")
+source("verif_functions.R")
+
+```
+
+Before you load the data, please make sure that your path points to the directory downloaded from [https://cloud.meteo.be/s/BzYNiaEYoWX8gnA](`cloud.meteo.be`).
+
+```{r data}
+## set the path to your data directory
+path <- "data"
+
+obsfile <- list.files(path, "observations.nc", full.names = TRUE)
+# exclude ZAMG v1.0 from being assessed due to wrong data format
+fcfiles <- setdiff(
+  list.files(path, ".nc$", full.names = TRUE), 
+  c(obsfile, "1_ESSD-benchmark_ZAMG_EMOS-v1.0.nc")
+)
+
+## read observations
+obs <- obsfile %>% 
+  tidync::tidync("t2m") %>%
+  tidync::hyper_tibble(na.rm = FALSE) %>%
+  dplyr::mutate(
+    time = as.POSIXct("1970-01-01", tz = 'UTC') + 
+      as.difftime(time, units = "secs")
+  ) %>%
+  dplyr::rename(obs = t2m)
+
+## read station metadata
+stations <- obsfile %>%
+  tidync::tidync("D0") %>% 
+  tidync::hyper_tibble(na.rm = FALSE)
+```
+
+The observations are read into a data frame with four columns. 
+The observed values are stored in the column named `obs`.
+
+```{r obs}
+obs
+```
+
+
+The forecasts follow the same format, with the exception that the ensemble or quantile forecast is stored as an matrix column. 
+This matrix column contains the 51 realizations (quantiles). 
+
+```{r fcst}
+read_file(fcfiles[1])
+```
+Additional station metadata is extracted from the `*observations.nc` file.
+```{r stations}
+stations
+```
+
+# Scores
+
+Scores are computed by joining the forecast and observation data frames on the common dimensions.
+This ensures that the ordering is correct (if correctly specified).
+
+```{r scores}
+scores <- lapply(fcfiles, compute_scores, obs = obs) %>%
+  dplyr::bind_rows()
+```
+
+Aggregates can be computed by using `group_by` and `summarize`.
+
+```{r score_mn}
+scores_mn <- scores %>%
+  tidyr::drop_na() %>% 
+  dplyr::group_by(source, step) %>%
+  dplyr::summarize(
+    bias = mean(mn - obs),
+    mae = mean(abs(mn - obs)), 
+    rmse = sqrt(mean((mn - obs)**2)), 
+    sd = mean(sd), 
+    crps = mean(crps), 
+    .groups = "drop"
+  ) %>% 
+  dplyr::mutate(
+    s2e = sd / rmse
+  )
+
+scores_map <- scores %>% 
+  tidyr::drop_na() %>%
+  dplyr::group_by(source, station_id) %>%
+  dplyr::summarize(
+    bias = mean(mn - obs),
+    mn = mean(mn), 
+    obs = mean(obs),
+    .groups = "drop"
+  ) %>%
+  left_join(stations, by = "station_id")
+```
+
+Some of the mis-specified files may not be sorted as expected, as shown by the correlation of ensemble mean and observed mean at stations.
+Datasets with very low correlation are excluded from further analysis. 
+
+```{r check}
+map_cor <- scores_map %>% 
+  group_by(source) %>%
+  summarize(cor = cor(mn, obs))
+
+okish <- map_cor %>%
+  dplyr::filter(cor > 0.7) %>%
+  dplyr::pull("source")
+
+map_cor
+```
+
+# Results
+
+We start with a plot of scores by lead time.
+
+```{r leadtime}
+library(ggplot2)
+
+scores_mn %>%
+  dplyr::filter(source %in% okish) %>%
+  tidyr::pivot_longer(-c(source, step)) %>%
+  ggplot(aes(x = step, y = value, col = source)) + 
+  geom_line() + 
+  facet_wrap(~ name, scales= "free_y", nrow = 3) + 
+  theme_light()
+```
+
+
+A map of the bias can be produced as follows.
+
+```{r map}
+scores_map %>%
+  dplyr::filter(source %in% okish) %>%
+  ggplot(aes(x = longitude, y = latitude)) + 
+  borders(
+    xlim = range(scores_map$longitude), 
+    ylim = range(scores_map$latitude)
+  ) + 
+  geom_point(aes(fill = bias), pch = 21, size = 3) + 
+  facet_wrap(~source) + 
+  scale_fill_gradient2(low = "darkblue", high = "darkred") + 
+  coord_fixed(
+    ratio = 1/ cos(50/180*pi),
+    xlim = range(scores_map$longitude), 
+    ylim = range(scores_map$latitude)
+  ) +
+  theme_void()
+```
+
+Rank histograms are produced as follows.
+
+```{r rank-histogram}
+scores %>% 
+  tidyr::drop_na() %>% 
+  group_by(source, rank) %>%
+  count() %>%
+  ggplot(aes(x = rank, y = n)) + 
+  geom_bar(stat = "identity") +  
+  facet_wrap(~source) + 
+  theme_light()
+```
