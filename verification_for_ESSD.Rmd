@@ -122,7 +122,7 @@ map_cor <- scores_map %>%
   summarize(cor = cor(mn, obs))
 
 okish <- map_cor %>%
-  dplyr::filter(cor > 0.7) %>%
+  dplyr::filter(cor > 0.7, !grepl("MetOffice", source)) %>%
   dplyr::pull("source")
 
 map_cor
@@ -137,26 +137,53 @@ library(ggplot2)
 
 scores_mn %>%
   dplyr::filter(source %in% okish) %>%
-  tidyr::pivot_longer(-c(source, step)) %>%
-  ggplot(aes(x = step, y = value, col = source)) + 
+  dplyr::mutate(source = gsub("EMOS-v1.1", "EMOS_v1.1", source)) %>%
+  tidyr::separate(source, into = c("source", "model", "version"), sep = "_") %>%
+  tidyr::pivot_longer(-c(source, model, version, step)) %>%
+  dplyr::mutate(source_tag = paste(source, version)) %>%
+  ggplot(aes(x = step, y = value, col = source_tag)) + 
   geom_line() + 
   facet_wrap(~ name, scales= "free_y", nrow = 3) + 
   theme_light()
 ```
 
+The skill scores need to be recomputed once the altitude corrected ECMWF IFS data are available. 
+
+```{r leadtime-skill}
+scores_mn %>%
+  dplyr::filter(source %in% okish) %>%
+  dplyr::mutate(source = gsub("EMOS-v1.1", "EMOS_v1.1", source)) %>%
+  tidyr::separate(source, into = c("source", "model", "version"), sep = "_") %>%
+  tidyr::pivot_longer(-c(source, model, version, step)) %>%
+  dplyr::mutate(source_tag = paste(source, version)) %>%
+  dplyr::select(-c(source, model, version)) %>%
+  tidyr::pivot_wider(names_from = source_tag, values_from = value) %>%
+  tidyr::pivot_longer(-c(step, name, `test forecasts`), names_to = "source_tag") %>%
+  dplyr::mutate(skill = 1 - value / `test forecasts`) %>%
+  dplyr::filter(name %in% c("crps", "mae", "rmse")) %>%
+  ggplot(aes(x = step, y = skill, col = source_tag)) + 
+  geom_hline(yintercept = 0, lty = 2) + 
+  geom_line() + 
+  facet_wrap(~ name, nrow = 3) + 
+  theme_light()
+```
 
 A map of the bias can be produced as follows.
 
 ```{r map}
 scores_map %>%
   dplyr::filter(source %in% okish) %>%
+  dplyr::mutate(source = gsub("EMOS-v1.1", "EMOS_v1.1", source)) %>%
+  tidyr::separate(source, into = c("source", "model", "version"), sep = "_") %>%
+  dplyr::mutate(source_tag = paste(source, version)) %>%
+  dplyr::filter(source_tag != "test forecasts") %>%
   ggplot(aes(x = longitude, y = latitude)) + 
   borders(
     xlim = range(scores_map$longitude), 
     ylim = range(scores_map$latitude)
   ) + 
-  geom_point(aes(fill = bias), pch = 21, size = 3) + 
-  facet_wrap(~source) + 
+  geom_point(aes(fill = bias), pch = 21, size = 2) + 
+  facet_wrap(~source_tag, nrow = 2) + 
   scale_fill_gradient2(low = "darkblue", high = "darkred") + 
   coord_fixed(
     ratio = 1/ cos(50/180*pi),
@@ -171,10 +198,15 @@ Rank histograms are produced as follows.
 ```{r rank-histogram}
 scores %>% 
   tidyr::drop_na() %>% 
+  dplyr::filter(source %in% okish) %>%
   group_by(source, rank) %>%
   count() %>%
+  dplyr::mutate(source = gsub("EMOS-v1.1", "EMOS_v1.1", source)) %>%
+  tidyr::separate(source, into = c("source", "model", "version"), sep = "_") %>%
+  dplyr::mutate(source_tag = paste(source, version)) %>%
+  dplyr::filter(source_tag != "test forecasts") %>%
   ggplot(aes(x = rank, y = n)) + 
   geom_bar(stat = "identity") +  
-  facet_wrap(~source) + 
+  facet_wrap(~source_tag) + 
   theme_light()
 ```
