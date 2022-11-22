@@ -7,7 +7,7 @@ output: html_document
 
 # Setup
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warnings = FALSE, fig.width = 8, fig.height = 4)
 ```
 This is an attempt at automatically installing dependencies.
 A better integrated way (e.g. `ESSD-verification` as a package) may be implemented at a later stage.
@@ -114,7 +114,7 @@ scores_map <- scores %>%
 ```
 
 Some of the mis-specified files may not be sorted as expected, as shown by the correlation of ensemble mean and observed mean at stations.
-Datasets with very low correlation are excluded from further analysis. 
+Datasets with issues are excluded from further analysis, this currently concerns the `1_ESSD-benchmark_Bielefeld-University_AR-EMOS_v1.0` and `1_ESSD-benchmark_MetOffice_IMPROVER-reliabilitycalibration-v1.3.1_v1.0` datasets.
 
 ```{r check}
 map_cor <- scores_map %>% 
