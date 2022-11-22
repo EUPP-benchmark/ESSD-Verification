@@ -18,6 +18,19 @@ compute_scores <- function(file, obs, list_of_functions = NULL) {
   
   df <- read_file(file) %>%
     dplyr::left_join(obs, by = c("step", "time", "station_id"))
+  if (basename(file) == "ESSD_benchmark_test_data_forecasts.nc") {
+    df <- stations %>%
+      dplyr::select(station_id, altitude, orography) %>%
+      dplyr::full_join(df, by = "station_id") %>%
+      dplyr::mutate(
+        fcst = fcst - 0.0065 * (altitude - orography)
+      ) %>%
+      dplyr::select(
+        -altitude, -orography
+      )
+  }
+  
+  
   for (nn in names(list_of_functions)) {
     message(paste0("  computing ", nn))
     df[[nn]] <- list_of_functions[[nn]](df$fcst, df$obs)
