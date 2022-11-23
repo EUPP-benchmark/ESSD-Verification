@@ -25,9 +25,15 @@ for (pkg in dependencies) {
 source("read_data.R")
 source("verif_functions.R")
 
+library(ggplot2)
 ```
 
+
+# Data
+
 Before you load the data, please make sure that your path points to the directory downloaded from [https://cloud.meteo.be/s/BzYNiaEYoWX8gnA](`cloud.meteo.be`).
+
+## Verifying observations and auxiliary data
 
 ```{r data}
 ## set the path to your data directory
@@ -63,11 +69,15 @@ stations <- obsfile %>%
     by = "station_id"
   ) %>%
   dplyr::left_join(
-    read.csv(paste0(path, "/percentage_of_nan_in_t2m.csv")), 
+    read.csv(paste0(path, "/percentage_of_nan_in_t2m.csv")) %>%
+      dplyr::rename(percentage_missing = X0), 
     by = "station_id"
   ) %>% 
-  dplyr::rename(
-    percentage_missing = X0
+  dplyr::left_join(
+    read.csv(paste0(path, "/percentage_of_nan_in_t2m_bvs.csv")) %>%
+      dplyr::rename(fraction_available = fraction) %>%
+      dplyr::select(-X), 
+    by = c("station_id", "station_name")
   )
 
 ```
@@ -80,18 +90,24 @@ obs
 ```
 
 
+Additional station metadata is extracted from the `*observations.nc` file and the `*.csv` files.
+```{r stations}
+stations
+```
+
+## Forecasts
+
 The forecasts follow the same format, with the exception that the ensemble or quantile forecast is stored as an matrix column. 
 This matrix column contains the 51 realizations (quantiles). 
 
 ```{r fcst}
 read_file(fcfiles[1])
 ```
-Additional station metadata is extracted from the `*observations.nc` file.
-```{r stations}
-stations
-```
+Some of the mis-specified files may not be sorted as expected, as shown by the correlation of ensemble mean and observed mean at stations.
+Datasets with issues are excluded from further analysis, this currently concerns the `1_ESSD-benchmark_Bielefeld-University_AR-EMOS_v1.0` and `1_ESSD-benchmark_MetOffice_IMPROVER-reliabilitycalibration-v1.3.1_v1.0` datasets.
 
-# Scores
+
+## Scores
 
 Scores are computed by joining the forecast and observation data frames on the common dimensions.
 This ensures that the ordering is correct (if correctly specified).
@@ -107,52 +123,33 @@ if (file.exists(scorefile)) {
 }
 ```
 
-<!-- First, we need to identify the common subset across all datasets in the analysis.  -->
-<!-- To do this we can count the number of `source`s per `station_id`, `time`, and `step`. -->
 
-```{r common, eval = FALSE}
+## Common subset for analysis
+First, we need to identify the common subset across all datasets in the analysis.
+To do this we can count the number of `source`s per `station_id`, `time`, and `step`.
+The variability with time is due to the variability in verifying observations, rather than postprocessed forecasts.
+
+```{r common}
 common <- scores %>%
   tidyr::drop_na() %>% 
-  dplyr::count(station_id, time, step) %>%
+  dplyr::count(station_id, time, step) %>% # count how many sources there are
   dplyr::ungroup() %>% 
   dplyr::filter(n == max(n)) %>%
   dplyr::select(-n)
 
 common %>% 
-  dplyr::filter(time < as.POSIXct("2017-05-01", tz = "UTC")) %>%
   dplyr::count(time, step) %>%
   ggplot(aes(x = step, y = time, fill = n)) + 
   geom_tile() + 
   theme_light() + 
   scale_fill_viridis_c()
 ```
-<!-- For simplicity, we also restrict analysis to the stations with less than 70% missing values. -->
-<!-- Also we chop off January 2017 to mitigate the varying number of missing values at start introduced by AR-EMOS. -->
-
-```{r common2, eval = FALSE}
-station_ids <- stations %>% 
-  dplyr::filter(percentage_missing < 30) %>%
-  dplyr::pull("station_id")
-
-common2 <- common %>% 
-  dplyr::filter(
-    time >= as.POSIXct("2017-02-03", tz = "UTC"), 
-    station_id %in% station_ids
-  ) 
-
-common2 %>%
-  dplyr::count(time, step) %>%
-  ggplot(aes(x = step, y = time, fill = n)) + 
-  geom_tile() + 
-  theme_light() + 
-  scale_fill_viridis_c(name = "Number of stations")
-```
-
+## Score aggregates
 Aggregates can be computed by using `group_by` and `summarize`.
 
 ```{r score_mn}
-scores_mn <-scores %>%
-  tidyr::drop_na() %>%
+scores_mn <- common %>%
+  dplyr::left_join(scores, by = c("station_id", "time", "step")) %>%
   dplyr::group_by(source, step) %>%
   dplyr::summarize(
     bias = mean(mn - obs),
@@ -169,8 +166,8 @@ scores_mn <-scores %>%
   tidyr::separate(source, into = c("source", "model", "version"), sep = "_") %>%
   dplyr::mutate(source_tag = paste(source, version)) 
 
-scores_map <- scores %>%
-  tidyr::drop_na() %>% 
+scores_map <-  common %>%
+  dplyr::left_join(scores, by = c("station_id", "time", "step")) %>%
   dplyr::group_by(source, station_id) %>%
   dplyr::summarize(
     bias = mean(mn - obs),
@@ -190,9 +187,16 @@ scores_map <- scores %>%
   tidyr::separate(source, into = c("source", "model", "version"), sep = "_") %>%
   dplyr::mutate(source_tag = paste(source, version)) 
 
+## add in CRPSS for scores_map
+scores_map <- scores_map %>% 
+  dplyr::filter(source_tag == "test forecasts") %>%
+  dplyr::select(station_id, crps) %>%
+  dplyr::rename(benchmark = crps) %>%
+  dplyr::full_join(scores_map, by = 'station_id') %>%
+  dplyr::mutate(crpss = 1 - crps / benchmark)
 
-ranks <- scores %>% 
-  tidyr::drop_na() %>% 
+ranks <-  common %>%
+  dplyr::left_join(scores, by = c("station_id", "time", "step")) %>%
   group_by(source, rank) %>%
   count() %>%
   dplyr::mutate(source = gsub("EMOS-v1.1", "EMOS_v1.1", source)) %>%
@@ -213,7 +217,7 @@ colours <- scores_mn %>%
   ) %>%
   dplyr::ungroup() %>%
   dplyr::mutate(
-    colour = hcl(source / max(source) * 360, l = 110 - 60 * version, c = 90)
+    colour = hcl(source / max(source) * 360, l = 110 - 60 * version, c = 70)
   )
 
 source_colours <- setNames(
@@ -224,10 +228,8 @@ source_colours <- setNames(
 
 ```
 
-Some of the mis-specified files may not be sorted as expected, as shown by the correlation of ensemble mean and observed mean at stations.
-Datasets with issues are excluded from further analysis, this currently concerns the `1_ESSD-benchmark_Bielefeld-University_AR-EMOS_v1.0` and `1_ESSD-benchmark_MetOffice_IMPROVER-reliabilitycalibration-v1.3.1_v1.0` datasets.
 
-```{r check}
+```{r check, eval = FALSE}
 map_cor <- scores_map %>% 
   group_by(source_tag) %>%
   summarize(cor = cor(mn, obs))
@@ -241,11 +243,10 @@ map_cor
 
 # Results
 
+## Scores by lead time
 We start with a plot of scores by lead time.
 
 ```{r leadtime}
-library(ggplot2)
-
 scores_mn %>%
   tidyr::pivot_longer(-c(source_tag, source, model, version, step)) %>%
   ggplot(aes(x = step, y = value, col = source_tag)) + 
@@ -254,8 +255,6 @@ scores_mn %>%
   theme_light() + 
   scale_color_manual(values = source_colours, name = "")
 ```
-
-The skill scores need to be recomputed once the altitude corrected ECMWF IFS data are available. 
 
 ```{r leadtime-skill}
 scores_mn %>%
@@ -270,9 +269,25 @@ scores_mn %>%
   geom_line() + 
   facet_wrap(~ name, nrow = 3) + 
   theme_light() + 
-  scale_color_manual(values = source_colours, name = "", drop = TRUE)
+  scale_color_manual(values = source_colours, name = "", drop = TRUE) + 
+  labs(y = "Skill against altitude-corrected ECMWF DMO")
 ```
 
+## Calibration
+Rank histograms are produced as follows.
+
+```{r rank-histogram}
+ ranks %>%
+  dplyr::filter(source_tag != "test forecasts") %>%
+  ggplot(aes(x = rank, y = n, fill = source_tag)) + 
+  geom_bar(stat = "identity") +  
+  facet_wrap(~source_tag) + 
+  theme_void() + 
+  scale_fill_manual(values = source_colours) + 
+  theme(legend.position = 'none', panel.border = element_rect(fill = NA)) 
+```
+
+## Score maps
 A map of the bias can be produced as follows.
 
 ```{r map-bias, fig.height = 8}
@@ -319,44 +334,6 @@ scores_map %>%
   theme_void()
 ```
 
-
-Alternatively, we may want to investigate bias in dependence of altitude, altitude difference to model orography, or percentage missing.
-
-```{r scores-altitude}
-scores_map %>%
-  tidyr::pivot_longer(c(bias, crps, sd, s2e), names_to = "score") %>%
-  ggplot(aes(x = altitude, y = value, col = source_tag)) + 
-  geom_point() + 
-  facet_grid(score ~ source_tag, scales = "free_y") + 
-  theme_light() + 
-  scale_color_manual(values = source_colours) + 
-  labs(x = "Altitude of station", y = "") + 
-  theme(legend.position = "none")
-```
-```{r scores-altitude-difference}
-scores_map %>%
-  tidyr::pivot_longer(c(bias, crps, sd, s2e), names_to = "score") %>%
-  ggplot(aes(x = altitude - orography, y = value, col = source_tag)) + 
-  geom_point() + 
-  facet_grid(score ~ source_tag, scales = "free_y") + 
-  theme_light() + 
-  scale_color_manual(values = source_colours) + 
-  labs(x = "Difference between station altitude and model orography", y = "") + 
-  theme(legend.position = "none")
-```
-
-```{r scores-missing}
-scores_map %>%
-  tidyr::pivot_longer(c(bias, crps, sd, s2e), names_to = "score") %>%
-  ggplot(aes(x = percentage_missing, y = value, col = source_tag)) + 
-  geom_point() + 
-  facet_grid(score ~ source_tag, scales = "free_y") + 
-  theme_light() + 
-  labs(x = "Percentage of missing values", y = "") + 
-  scale_color_manual(values = source_colours) + 
-  theme(legend.position = "none")
-```
-
 What is the best postprocessing method per station (measured in average CRPS)?
 
 ```{r best, fig.height = 8}
@@ -387,15 +364,55 @@ dd %>%
 ```
 
 
-Rank histograms are produced as follows.
+## Scores in dependence of auxiliary data
+Alternatively, we may want to investigate bias in dependence of altitude, altitude difference to model orography, or percentage missing.
 
-```{r rank-histogram}
- ranks %>%
-  dplyr::filter(source_tag != "test forecasts") %>%
-  ggplot(aes(x = rank, y = n, fill = source_tag)) + 
-  geom_bar(stat = "identity") +  
-  facet_wrap(~source_tag) + 
-  theme_void() + 
-  scale_fill_manual(values = source_colours) + 
-  theme(legend.position = 'none', panel.border = element_rect(fill = NA)) 
+```{r scores-altitude}
+scores_map %>%
+  tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
+  ggplot(aes(x = altitude, y = value, col = source_tag)) + 
+  geom_point() + 
+  facet_grid(score ~ source_tag, scales = "free_y") + 
+  theme_light() + 
+  scale_color_manual(values = source_colours) + 
+  labs(x = "Altitude of station", y = "") + 
+  theme(legend.position = "none")
 ```
+```{r scores-altitude-difference}
+scores_map %>%
+  tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
+  ggplot(aes(x = altitude - orography, y = value, col = source_tag)) + 
+  geom_point() + 
+  facet_grid(score ~ source_tag, scales = "free_y") + 
+  theme_light() + 
+  scale_color_manual(values = source_colours) + 
+  labs(x = "Difference between station altitude and model orography", y = "") + 
+  theme(legend.position = "none")
+```
+
+```{r scores-missing}
+scores_map %>%
+  tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
+  ggplot(aes(x = percentage_missing, y = value, col = source_tag)) + 
+  geom_point() + 
+  facet_grid(score ~ source_tag, scales = "free_y") + 
+  theme_light() + 
+  labs(x = "Percentage of missing values", y = "") + 
+  scale_color_manual(values = source_colours) + 
+  theme(legend.position = "none")
+```
+
+```{r scores-training}
+scores_map %>%
+  tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
+  ggplot(aes(x = fraction_available, y = value, col = source_tag)) + 
+  geom_point() + 
+  facet_grid(score ~ source_tag, scales = "free_y") + 
+  theme_light() + 
+  labs(x = "Fraction of observations in training set", y = "") + 
+  scale_color_manual(values = source_colours) + 
+  theme(legend.position = "none")
+```
+
+
+
