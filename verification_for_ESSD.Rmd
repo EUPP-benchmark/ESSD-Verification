@@ -46,8 +46,8 @@ fcfiles <- list.files(path, ".nc$", full.names = TRUE) %>%
   grep("ZAMG_EMOS-v1.0.nc", ., invert = TRUE, value = TRUE) %>%
   grep("KIT_simple-NN_v1.0.nc", ., invert = TRUE, value = TRUE) %>%
   grep("ECMWF.*v1.0.nc", ., invert = TRUE, value = TRUE) %>%
-  grep("Bielefeld", ., invert = TRUE, value = TRUE) %>%
-  grep("MetOffice", ., invert = TRUE, value = TRUE)
+  grep("Bielefeld.*1.0", ., invert = TRUE, value = TRUE) %>%
+  grep("MetOffice.*1.0", ., invert = TRUE, value = TRUE)
 
 ## read observations
 obs <- obsfile %>% 
@@ -111,16 +111,11 @@ Datasets with issues are excluded from further analysis, this currently concerns
 
 Scores are computed by joining the forecast and observation data frames on the common dimensions.
 This ensures that the ordering is correct (if correctly specified).
-
+Simple file-based caching is now done in `compute_scores`. 
+If you want to recompute the scores, you have to delete all `*.rds` files in your data directory.
 ```{r scores}
-scorefile <- paste0(path, "/scores.rds")
-if (file.exists(scorefile)) {
-  scores <- readRDS(scorefile)
-} else {
-  scores <- lapply(fcfiles, compute_scores, obs = obs) %>%
-    dplyr::bind_rows()
-  saveRDS(scores, scorefile)
-}
+scores <- lapply(fcfiles, compute_scores, obs = obs) %>%
+  dplyr::bind_rows()
 ```
 
 
@@ -137,6 +132,10 @@ common <- scores %>%
   dplyr::filter(n == max(n)) %>%
   dplyr::select(-n)
 
+## subset scores
+scores <- common %>%
+  dplyr::left_join(scores, by = c("station_id", "time", "step")) 
+
 common %>% 
   dplyr::count(time, step) %>%
   ggplot(aes(x = step, y = time, fill = n)) + 
@@ -144,12 +143,70 @@ common %>%
   theme_light() + 
   scale_fill_viridis_c()
 ```
+## Overall scores and uncertainty
+
+```{r uncertainty, fig.height = 5}
+scores_array <- scores %>% 
+  dplyr::select(source, station_id, time, step, crps) %>%
+  tidyr::pivot_wider(names_from = "source", values_from = "crps") %>%
+  dplyr::select(-station_id, -time, -step)
+
+scores_diff <- sapply(
+  scores_array, 
+  function(x) {
+    sapply(scores_array, function(y) SpecsVerification::ScoreDiff(x, y), simplify = 'array')
+  }, 
+  simplify = 'array'
+) 
+
+scores_txt <- scores_diff %>%
+  round(3) %>% 
+  apply(
+    2:3, 
+    function(x) {
+      paste0(x["score.diff"], " (", x["L"], " to ", x["U"], ")")
+    }) %>%
+  as.vector()
+
+source_tags <- tibble::tibble(
+  source = colnames(scores_diff) 
+) %>%
+  dplyr::mutate(source = gsub("EMOS-v1.1", "EMOS_v1.1", source)) %>%
+  tidyr::separate(source, into = c("source", "model", "version"), sep = "_") %>%
+  dplyr::mutate(source_tag = paste(source, version)) %>%
+  dplyr::pull(source_tag)
+
+tidyr::expand_grid(
+  source1 = source_tags, 
+  source2 = source_tags
+) %>%
+  dplyr::mutate(
+    p_value = as.vector(scores_diff["p.value",,]), 
+    diff = as.vector(scores_diff["score.diff",,]),
+    text = scores_txt, 
+    text = gsub("\\(", "\n(", text)
+  ) %>%
+  ggplot(aes(x = source1, y = source2, fill = diff)) + 
+  geom_tile() + 
+  geom_text(aes(label = text), size = 1.1) + 
+  scale_fill_gradient2(low = "darkgreen", high = "purple", na.value = NA) + 
+  theme_light() + 
+  theme(
+    legend.position = "none", 
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)
+  ) + 
+  labs(x = "", y = "") + 
+  ggtitle(
+    "Difference in mean CRPS",
+    subtitle = "All differences are significant at 95% level according to `SpecsVerification::ScoreDiff`"
+  )
+```
+
 ## Score aggregates
 Aggregates can be computed by using `group_by` and `summarize`.
 
 ```{r score_mn}
-scores_mn <- common %>%
-  dplyr::left_join(scores, by = c("station_id", "time", "step")) %>%
+scores_mn <- scores %>%
   dplyr::group_by(source, step) %>%
   dplyr::summarize(
     bias = mean(mn - obs),
@@ -166,8 +223,7 @@ scores_mn <- common %>%
   tidyr::separate(source, into = c("source", "model", "version"), sep = "_") %>%
   dplyr::mutate(source_tag = paste(source, version)) 
 
-scores_map <-  common %>%
-  dplyr::left_join(scores, by = c("station_id", "time", "step")) %>%
+scores_map <-  scores %>%
   dplyr::group_by(source, station_id) %>%
   dplyr::summarize(
     bias = mean(mn - obs),
@@ -195,8 +251,7 @@ scores_map <- scores_map %>%
   dplyr::full_join(scores_map, by = 'station_id') %>%
   dplyr::mutate(crpss = 1 - crps / benchmark)
 
-ranks <-  common %>%
-  dplyr::left_join(scores, by = c("station_id", "time", "step")) %>%
+ranks <-  scores %>%
   group_by(source, rank) %>%
   count() %>%
   dplyr::mutate(source = gsub("EMOS-v1.1", "EMOS_v1.1", source)) %>%
@@ -222,6 +277,11 @@ colours <- scores_mn %>%
 
 source_colours <- setNames(
   c("#000000", colours$colour), 
+  c("test forecasts", colours$source_tag)
+)
+
+source_shapes <- setNames(
+  c(21, 21 + colours$source %% 4), 
   c("test forecasts", colours$source_tag)
 )
 
@@ -290,7 +350,7 @@ Rank histograms are produced as follows.
 ## Score maps
 A map of the bias can be produced as follows.
 
-```{r map-bias, fig.height = 8}
+```{r map-bias, fig.height = 9}
 scores_map %>%
   dplyr::filter(source_tag != "test forecasts") %>%
   ggplot(aes(x = longitude, y = latitude)) + 
@@ -299,17 +359,17 @@ scores_map %>%
     ylim = range(scores_map$latitude)
   ) + 
   geom_point(aes(fill = bias), pch = 21, size = 2) + 
-  facet_wrap(~source_tag, nrow = 2) + 
+  facet_wrap(~source_tag) + 
   scale_fill_gradient2(low = "darkblue", high = "darkred") + 
   coord_fixed(
     ratio = 1/ cos(50/180*pi),
     xlim = range(scores_map$longitude), 
     ylim = range(scores_map$latitude)
   ) +
-  theme_void()
+  theme_light()
 ```
 
-```{r map-crpss, fig.height = 8}
+```{r map-crpss, fig.height = 9}
 scores_map %>%
   dplyr::select(station_id, longitude, latitude, source_tag, crps) %>%
   tidyr::pivot_wider(names_from = "source_tag", values_from = "crps") %>%
@@ -324,14 +384,14 @@ scores_map %>%
     ylim = range(scores_map$latitude)
   ) + 
   geom_point(aes(fill = skill), pch = 21, size = 2) + 
-  facet_wrap(~source_tag, nrow = 2) + 
+  facet_wrap(~source_tag) + 
   scale_fill_gradient2(low = "purple", high = "darkgreen") + 
   coord_fixed(
     ratio = 1/ cos(50/180*pi),
     xlim = range(scores_map$longitude), 
     ylim = range(scores_map$latitude)
   ) +
-  theme_void()
+  theme_light()
 ```
 
 What is the best postprocessing method per station (measured in average CRPS)?
@@ -347,17 +407,21 @@ dd %>%
     xlim = range(scores_map$longitude), 
     ylim = range(scores_map$latitude)
   ) + 
-  geom_point(pch = 21, size = 3) + 
+  geom_point(aes(pch = source_tag), size = 3) + 
   coord_fixed(
     ratio = 1/ cos(50/180*pi),
     xlim = range(scores_map$longitude), 
     ylim = range(scores_map$latitude)
   ) +
-  theme_void() + 
+  theme_light() + 
   theme(panel.border = element_rect(fill = NA)) + 
   scale_fill_manual(
-    values = source_colours, 
-    drop = TRUE, name = ""
+    name = "",
+    values = source_colours
+  ) +
+  scale_shape_manual(
+    name = "",
+    values = source_shapes
   )
 
   
