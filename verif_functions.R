@@ -5,8 +5,12 @@ library(tibble)
 library(dplyr)
 
 
-compute_scores <- function(file, obs, list_of_functions = NULL) {
+compute_scores <- function(file, obs, list_of_functions = NULL, caching = TRUE) {
   message(paste0("Compute scores on ", basename(file)))
+  if (caching) {
+    outfile <- gsub("\\.nc$", ".rds", file)
+    if (file.exists(outfile)) return(readRDS(outfile))
+  }
   if (is.null(list_of_functions)) {
     list_of_functions <- list(
       mn = function(ens, obs) rowMeans(ens),
@@ -18,7 +22,7 @@ compute_scores <- function(file, obs, list_of_functions = NULL) {
   
   df <- read_file(file) %>%
     dplyr::left_join(obs, by = c("step", "time", "station_id"))
-  if (basename(file) == "ESSD_benchmark_test_data_forecasts.nc") {
+  if (basename(file) %in% c("ESSD_benchmark_test_data_forecasts.nc", "1_ESSD-benchmark_MetOffice_IMPROVER-reliabilitycalibration-v1.3.1_v1.2.nc")) {
     df <- stations %>%
       dplyr::select(station_id, altitude, orography) %>%
       dplyr::full_join(df, by = "station_id") %>%
@@ -35,13 +39,17 @@ compute_scores <- function(file, obs, list_of_functions = NULL) {
     message(paste0("  computing ", nn))
     df[[nn]] <- list_of_functions[[nn]](df$fcst, df$obs)
   }
-  df %>%
+  out <- df %>%
     dplyr::select(-fcst) %>%
     dplyr::mutate(
       source = basename(file) %>%
         gsub(".*ESSD.benchmark_", "", .) %>%
         gsub(".nc", "", .)
     )
+  if (caching) {
+    saveRDS(out, file = outfile)
+  }
+  return(out)
 }
 
 
