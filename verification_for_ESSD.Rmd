@@ -477,6 +477,31 @@ scores_map %>%
   scale_color_manual(values = source_colours) + 
   theme(legend.position = "none")
 ```
+```{r time}
+scores_ty <- scores %>%
+  dplyr::group_by(source, time) %>%
+  dplyr::summarize(
+    bias = mean(mn - obs),
+    mae = mean(abs(mn - obs)), 
+    rmse = sqrt(mean((mn - obs)**2)), 
+    sd = mean(sd), 
+    crps = mean(crps), 
+    .groups = "drop"
+  ) %>% 
+  dplyr::mutate(
+    s2e = sd / rmse
+  ) %>%
+  dplyr::mutate(source = gsub("EMOS-v1.1", "EMOS_v1.1", source)) %>%
+  tidyr::separate(source, into = c("source", "model", "version"), sep = "_") %>%
+  dplyr::mutate(source_tag = paste(source, version)) 
 
 
+scores_ty %>%
+  tidyr::pivot_longer(-c(source_tag, source, model, version, time)) %>%
+  ggplot(aes(x = time, y = value, col = source_tag)) + 
+  geom_line() + 
+  facet_wrap(~ name, scales= "free_y", nrow = 3) + 
+  theme_light() + 
+  scale_color_manual(values = source_colours, name = "")
+```
 
