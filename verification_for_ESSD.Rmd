@@ -3,13 +3,18 @@ title: "Benchmark for ESSD"
 author: "EUMETNET verification team"
 date: "`r Sys.Date()`"
 output: 
+  pdf_document:
+    keep_md: true
   html_document:
     code_folding: hide
+params:
+  patch: "patch"
+  colour: "colour"
 ---
 
 # Setup
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 4)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 8, fig.height = 6)
 ```
 This is an attempt at automatically installing dependencies.
 A better integrated way (e.g. `ESSD-verification` as a package) may be implemented at a later stage.
@@ -26,6 +31,36 @@ source("read_data.R")
 source("verif_functions.R")
 
 library(ggplot2)
+
+mytheme <- theme_bw() + 
+  theme(
+    strip.background = element_rect(fill = NA, colour = NA),
+    strip.text = element_text(hjust = 0)
+  )
+
+theme_set(mytheme)
+
+
+label_wrap_gen2 <- function(width = 18) {
+  fun <- function(labels) {
+    labels <- lapply(labels, factor)
+    labels <- lapply(labels, function(x) paste0(letters[as.numeric(x)], ") ", as.character(x)))
+    lapply(
+      labels, 
+      function(x) {
+        x <- strwrap(x, width = width, simplify = FALSE)
+        vapply(x, paste, character(1), collapse = "\n")
+      }
+    )
+  }
+  structure(fun, class = "labeller")
+}
+
+gridlines <- tibble::tibble(
+  score = c("bias", "crpss", "s2e", "crps", "sd"),
+  hline = c(0, 0, 1, NA, NA)
+)
+
 ```
 
 
@@ -45,9 +80,20 @@ fcfiles <- list.files(path, ".nc$", full.names = TRUE) %>%
   grep(obsfile, ., invert = TRUE, value = TRUE) %>%
   grep("ZAMG_EMOS-v1.0.nc", ., invert = TRUE, value = TRUE) %>%
   grep("KIT_simple-NN_v1.0.nc", ., invert = TRUE, value = TRUE) %>%
-  grep("ECMWF.*v1.0.nc", ., invert = TRUE, value = TRUE) %>%
+  grep("ECMWF.*v1.[01].nc", ., invert = TRUE, value = TRUE) %>%
   grep("Bielefeld.*1.0", ., invert = TRUE, value = TRUE) %>%
-  grep("MetOffice.*1.0", ., invert = TRUE, value = TRUE)
+  grep("Hildesheim.*1.0", ., invert = TRUE, value = TRUE) %>%
+  grep("MetOffice", ., invert = TRUE, value = TRUE) %>%
+  grep("ARSO.*v0.9", ., invert = TRUE, value = TRUE) %>%
+  grep("ARSO.*v1.1", ., invert = TRUE, value = TRUE) %>%
+  grep("RMIB.*seasonal", ., invert = TRUE, value = TRUE)
+# fcfiles <- list.files(path, ".nc$", full.names = TRUE) %>%
+#   grep(obsfile, ., invert = TRUE, value = TRUE) %>%
+#   grep("ZAMG_EMOS-v1.0.nc", ., invert = TRUE, value = TRUE) %>%
+#   grep("KIT_simple-NN_v1.0.nc", ., invert = TRUE, value = TRUE) %>%
+#   # grep("ECMWF.*v1.[01].nc", ., invert = TRUE, value = TRUE) %>%
+#   grep("Bielefeld.*1.0", ., invert = TRUE, value = TRUE) %>%
+#   grep("MetOffice_v1.[02]", ., invert = TRUE, value = TRUE)
 
 ## read observations
 obs <- obsfile %>% 
@@ -114,8 +160,43 @@ This ensures that the ordering is correct (if correctly specified).
 Simple file-based caching is now done in `compute_scores`. 
 If you want to recompute the scores, you have to delete all `*.rds` files in your data directory.
 ```{r scores}
-scores <- lapply(fcfiles, compute_scores, obs = obs) %>%
-  dplyr::bind_rows()
+
+if (params$patch == "patch") {
+  
+  dmo <- compute_scores(
+    grep("test_data_forecasts", fcfiles, value = TRUE), 
+    obs = obs
+  ) %>% 
+    dplyr::select(-source)
+  
+  scores <- lapply(
+    fcfiles, 
+    function(file, obs, dmo) {
+      out <- compute_scores(file, obs) %>%
+        tidyr::drop_na()
+      if (nrow(out) < nrow(dmo)) {
+        out2 <- dmo %>%
+          dplyr::mutate(source = out$source[1]) %>%
+          dplyr::anti_join(
+            out, 
+            by = c("source", "step", "time", "station_id")
+          )
+        out <- out %>% 
+          dplyr::bind_rows(out2)
+      }
+      out 
+    }, 
+    obs = obs, 
+    dmo = dmo
+  ) %>%
+    dplyr::bind_rows() %>%
+    tidyr::drop_na()
+  
+} else {
+  scores <- lapply(scores, compute_scores, obs = obs) %>%
+    dplyr::bind_rows() %>%
+    tidyr::drop_na()
+}
 ```
 
 
@@ -124,9 +205,22 @@ First, we need to identify the common subset across all datasets in the analysis
 To do this we can count the number of `source`s per `station_id`, `time`, and `step`.
 The variability with time is due to the variability in verifying observations, rather than postprocessed forecasts.
 
+```{r common-by-model}
+scores %>% 
+  dplyr::count(time, step, source) %>%
+  dplyr::mutate(source = gsub("EMOS-v1.1", "EMOS_v1.1", source)) %>%
+  tidyr::separate(source, into = c("source", "model", "version"), sep = "_") %>%
+  dplyr::mutate(source_tag = paste(source, version)) %>%
+  ggplot(aes(x = step, y = time, fill = n)) + 
+  geom_tile() + 
+  theme_void() +
+  facet_wrap(~ source_tag, labeller = label_wrap_gen(width = 18)) + 
+  scale_fill_viridis_c()
+```
+
+
 ```{r common}
 common <- scores %>%
-  tidyr::drop_na() %>% 
   dplyr::count(station_id, time, step) %>% # count how many sources there are
   dplyr::ungroup() %>% 
   dplyr::filter(n == max(n)) %>%
@@ -143,9 +237,10 @@ common %>%
   theme_light() + 
   scale_fill_viridis_c()
 ```
+
 ## Overall scores and uncertainty
 
-```{r uncertainty, fig.height = 5}
+```{r uncertainty}
 scores_array <- scores %>% 
   dplyr::select(source, station_id, time, step, crps) %>%
   tidyr::pivot_wider(names_from = "source", values_from = "crps") %>%
@@ -158,6 +253,9 @@ scores_diff <- sapply(
   }, 
   simplify = 'array'
 ) 
+
+rm(scores_array)
+gc(verbose = FALSE) 
 
 scores_txt <- scores_diff %>%
   round(3) %>% 
@@ -276,7 +374,7 @@ colours <- scores_mn %>%
   )
 
 source_colours <- setNames(
-  c("#000000", colours$colour), 
+  c("#333333", colours$colour), 
   c("test forecasts", colours$source_tag)
 )
 
@@ -285,7 +383,17 @@ source_shapes <- setNames(
   c("test forecasts", colours$source_tag)
 )
 
+sources <- setdiff(unique(scores_map$source_tag), "test forecasts")
+source_renamer <- c("ECMWF DMO", paste0("model ", letters[seq_along(sources)])) %>%
+  setNames(c("test forecasts", sources))
 
+source_colours2 <- ifelse(source_colours == "#333333", source_colours, "#888888")
+renamer <- c(
+  bias = "Bias", 
+  crps = "CRPS",
+  crpss = "CRPSS",
+  s2e = "Spread-error-ratio", 
+  sd = "Ensemble spread")
 ```
 
 
@@ -310,11 +418,37 @@ We start with a plot of scores by lead time.
 scores_mn %>%
   tidyr::pivot_longer(-c(source_tag, source, model, version, step)) %>%
   ggplot(aes(x = step, y = value, col = source_tag)) + 
+  geom_hline(
+    data = dplyr::rename(gridlines, name = score) %>% dplyr::filter(name != "crpss"), 
+    aes(yintercept = hline), lty = 2, col = grey(0.2)
+  ) + 
   geom_line() + 
-  facet_wrap(~ name, scales= "free_y", nrow = 3) + 
-  theme_light() + 
-  scale_color_manual(values = source_colours, name = "")
+  facet_wrap(~ name, scales= "free_y", nrow = 3, labeller = label_wrap_gen2()) + 
+  scale_color_manual(values = source_colours, name = "") + 
+  scale_x_continuous(breaks = seq(0, 120, 24)) + 
+  labs(x = "Lead time (hours)", y = "")
 ```
+
+```{r leadtime-paper, fig.width = 6, fig.height = 4}
+scores_mn %>%
+  tidyr::pivot_longer(-c(source_tag, source, model, version, step)) %>%
+  dplyr::filter(name %in% c("bias", "crps", "s2e", "sd")) %>%
+  dplyr::mutate(name = renamer[name]) %>% 
+  ggplot(aes(x = step, y = value, col = source_tag)) + 
+  geom_hline(
+    data = dplyr::rename(gridlines, name = score) %>% 
+      dplyr::filter(name != "crpss") %>%
+      dplyr::mutate(name = renamer[name]), 
+    aes(yintercept = hline), lty = 2, col = grey(0.2)
+  ) + 
+  geom_line() + 
+  facet_wrap(~ name, scales= "free_y", nrow = 3, labeller = label_wrap_gen2(width = 25)) + 
+  scale_color_manual(values = source_colours2, name = "") + 
+  scale_x_continuous(breaks = seq(0, 120, 24)) + 
+  labs(x = "Lead time (hours)", y = "") + 
+  theme(legend.position = 'none')
+```
+
 
 ```{r leadtime-skill}
 scores_mn %>%
@@ -324,33 +458,92 @@ scores_mn %>%
   tidyr::pivot_longer(-c(step, name, `test forecasts`), names_to = "source_tag") %>%
   dplyr::mutate(skill = 1 - value / `test forecasts`) %>%
   dplyr::filter(name %in% c("crps", "mae", "rmse")) %>%
-  ggplot(aes(x = step, y = skill, col = source_tag)) + 
-  geom_hline(yintercept = 0, lty = 2) + 
+  ggplot(aes(x = step, y = skill*100, col = source_tag)) + 
+  geom_hline(yintercept = 0, lty = 2, col = grey(0.2)) + 
   geom_line() + 
-  facet_wrap(~ name, nrow = 3) + 
-  theme_light() + 
+  facet_wrap(~ name, nrow = 3, labeller = label_wrap_gen2()) + 
   scale_color_manual(values = source_colours, name = "", drop = TRUE) + 
-  labs(y = "Skill against altitude-corrected ECMWF DMO")
+  labs(y = "Skill against altitude-corrected ECMWF DMO (%)", x = "Lead time (hours)") + 
+  scale_x_continuous(breaks = seq(0, 120, 24))
 ```
+
+## Scores by valid time
+
+```{r time}
+scores_ty <- scores %>%
+  dplyr::mutate(yearmonth = lubridate::floor_date(time, "month")) %>%
+  dplyr::group_by(source, yearmonth) %>%
+  dplyr::summarize(
+    bias = mean(mn - obs),
+    mae = mean(abs(mn - obs)), 
+    rmse = sqrt(mean((mn - obs)**2)), 
+    sd = mean(sd), 
+    crps = mean(crps), 
+    n = n(),
+    .groups = "drop"
+  ) %>% 
+  dplyr::mutate(
+    s2e = sd / rmse
+  ) %>%
+  dplyr::mutate(source = gsub("EMOS-v1.1", "EMOS_v1.1", source)) %>%
+  tidyr::separate(source, into = c("source", "model", "version"), sep = "_") %>%
+  dplyr::mutate(source_tag = paste(source, version)) 
+
+
+scores_ty %>%
+  dplyr::select(-n) %>%
+  tidyr::pivot_longer(-c(source_tag, source, model, version, yearmonth)) %>%
+  ggplot(aes(x = yearmonth, y = value, col = source_tag)) + 
+  geom_line() + 
+  geom_hline(
+    data = dplyr::rename(gridlines, name = score) %>% dplyr::filter(name != "crpss"), 
+    aes(yintercept = hline), lty = 2, col = grey(0.2)
+  ) + 
+  facet_wrap(~ name, scales= "free_y", nrow = 3, labeller = label_wrap_gen2()) + 
+  scale_color_manual(values = source_colours, name = "") + 
+  labs(x = "", y = "") + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
+
 
 ## Calibration
 Rank histograms are produced as follows.
 
 ```{r rank-histogram}
- ranks %>%
+ranks %>%
   dplyr::filter(source_tag != "test forecasts") %>%
   ggplot(aes(x = rank, y = n, fill = source_tag)) + 
   geom_bar(stat = "identity") +  
-  facet_wrap(~source_tag) + 
-  theme_void() + 
+  facet_wrap(~source_tag, labeller = label_wrap_gen2(width = 35)) + 
   scale_fill_manual(values = source_colours) + 
-  theme(legend.position = 'none', panel.border = element_rect(fill = NA)) 
+  theme(
+    legend.position = 'none', 
+    axis.text = element_blank(),
+    axis.ticks = element_blank()
+  ) + 
+  labs(x = "", y = "")
+```
+
+```{r rank-histogram-paper, fig.height = 2}
+ranks %>%
+  dplyr::filter(source_tag != "test forecasts") %>%
+  dplyr::mutate(source_tag = source_renamer[source_tag]) %>%
+  ggplot(aes(x = rank, y = n)) + 
+  geom_bar(stat = "identity", col = "#888888", fill = "#888888") +  
+  facet_wrap(~source_tag, labeller = label_wrap_gen2(width = 35), nrow = 1) + 
+  theme(
+    legend.position = 'none', 
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank()
+  ) + 
+  labs(x = "", y = "")
 ```
 
 ## Score maps
 A map of the bias can be produced as follows.
 
-```{r map-bias, fig.height = 9}
+```{r map-bias, fig.height = 7}
 scores_map %>%
   dplyr::filter(source_tag != "test forecasts") %>%
   ggplot(aes(x = longitude, y = latitude)) + 
@@ -359,17 +552,36 @@ scores_map %>%
     ylim = range(scores_map$latitude)
   ) + 
   geom_point(aes(fill = bias), pch = 21, size = 2) + 
-  facet_wrap(~source_tag) + 
+  facet_wrap(~source_tag, labeller = label_wrap_gen2(width = 35), ncol = 4) + 
   scale_fill_gradient2(low = "darkblue", high = "darkred") + 
   coord_fixed(
     ratio = 1/ cos(50/180*pi),
     xlim = range(scores_map$longitude), 
     ylim = range(scores_map$latitude)
   ) +
-  theme_light()
+  theme(legend.position = c(0.8, 0.25))
 ```
 
-```{r map-crpss, fig.height = 9}
+```{r map-bias-paper, fig.height = 3, fig.width = 11.5}
+scores_map %>%
+  dplyr::filter(source_tag != "test forecasts") %>%
+  dplyr::mutate(source_tag = source_renamer[source_tag]) %>%
+  ggplot(aes(x = longitude, y = latitude)) + 
+  borders(
+    xlim = range(scores_map$longitude), 
+    ylim = range(scores_map$latitude)
+  ) + 
+  geom_point(aes(fill = bias), pch = 21, size = 2) + 
+  facet_wrap(~source_tag, labeller = label_wrap_gen2(width = 35), nrow = 1) + 
+  scale_fill_gradient2(low = "darkblue", high = "darkred") + 
+  coord_fixed(
+    ratio = 1/ cos(50/180*pi),
+    xlim = range(scores_map$longitude), 
+    ylim = range(scores_map$latitude)
+  ) 
+```
+
+```{r map-crpss, fig.height = 7}
 scores_map %>%
   dplyr::select(station_id, longitude, latitude, source_tag, crps) %>%
   tidyr::pivot_wider(names_from = "source_tag", values_from = "crps") %>%
@@ -384,14 +596,14 @@ scores_map %>%
     ylim = range(scores_map$latitude)
   ) + 
   geom_point(aes(fill = skill), pch = 21, size = 2) + 
-  facet_wrap(~source_tag) + 
+  facet_wrap(~source_tag, labeller = label_wrap_gen2(width = 35), ncol = 4) + 
   scale_fill_gradient2(low = "purple", high = "darkgreen") + 
   coord_fixed(
     ratio = 1/ cos(50/180*pi),
     xlim = range(scores_map$longitude), 
     ylim = range(scores_map$latitude)
-  ) +
-  theme_light()
+  ) + 
+  theme(legend.position = c(0.8, 0.25))
 ```
 
 What is the best postprocessing method per station (measured in average CRPS)?
@@ -424,84 +636,90 @@ dd %>%
     values = source_shapes
   )
 
-  
+
 ```
 
 
 ## Scores in dependence of auxiliary data
 Alternatively, we may want to investigate bias in dependence of altitude, altitude difference to model orography, or percentage missing.
 
-```{r scores-altitude}
+```{r scores-altitude, fig.width = 12, fig.height = 8}
 scores_map %>%
   tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
   ggplot(aes(x = altitude, y = value, col = source_tag)) + 
-  geom_point() + 
-  facet_grid(score ~ source_tag, scales = "free_y") + 
-  theme_light() + 
+  geom_point(alpha = 0.3) + 
+  geom_hline(data = gridlines, aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  facet_grid(score ~ source_tag, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
   scale_color_manual(values = source_colours) + 
   labs(x = "Altitude of station", y = "") + 
-  theme(legend.position = "none")
+  theme(
+    legend.position = "none", 
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+  )
 ```
-```{r scores-altitude-difference}
+
+```{r scores-altitude-paper, fig.width = 12, fig.height = 8}
+scores_map %>%
+  tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
+  dplyr::mutate(
+    source_tag = source_renamer[source_tag], 
+    score = renamer[score]
+  ) %>%
+  ggplot(aes(x = pmax(altitude, 0), y = value)) + 
+  geom_point(alpha = 0.3, col = "#888888") + 
+  geom_hline(data = gridlines %>% dplyr::mutate(score = renamer[score]), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  facet_grid(score ~ source_tag, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
+  labs(x = "Altitude of station", y = "") + 
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+  ) + 
+  coord_trans(x = "sqrt") + 
+  scale_x_continuous(breaks = c(50, 200, 500, 1000, 2000, 3000))
+```
+
+```{r scores-altitude-difference, fig.width = 12, fig.height = 8}
 scores_map %>%
   tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
   ggplot(aes(x = altitude - orography, y = value, col = source_tag)) + 
-  geom_point() + 
-  facet_grid(score ~ source_tag, scales = "free_y") + 
-  theme_light() + 
+  geom_point(alpha = 0.3) + 
+  geom_hline(data = gridlines, aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  facet_grid(score ~ source_tag, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
   scale_color_manual(values = source_colours) + 
   labs(x = "Difference between station altitude and model orography", y = "") + 
-  theme(legend.position = "none")
+  theme(
+    legend.position = "none", 
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+  )
 ```
 
-```{r scores-missing}
+```{r scores-missing, fig.width = 12, fig.height = 8}
 scores_map %>%
   tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
   ggplot(aes(x = percentage_missing, y = value, col = source_tag)) + 
-  geom_point() + 
-  facet_grid(score ~ source_tag, scales = "free_y") + 
-  theme_light() + 
+  geom_point(alpha = 0.3) + 
+  geom_hline(data = gridlines, aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  facet_grid(score ~ source_tag, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
   labs(x = "Percentage of missing values", y = "") + 
   scale_color_manual(values = source_colours) + 
-  theme(legend.position = "none")
+  theme(
+    legend.position = "none", 
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+  )
 ```
 
-```{r scores-training}
+```{r scores-training, fig.width = 12, fig.height = 8}
 scores_map %>%
   tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
   ggplot(aes(x = fraction_available, y = value, col = source_tag)) + 
-  geom_point() + 
-  facet_grid(score ~ source_tag, scales = "free_y") + 
-  theme_light() + 
+  geom_point(alpha = 0.3) + 
+  geom_hline(data = gridlines, aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  facet_grid(score ~ source_tag, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
   labs(x = "Fraction of observations in training set", y = "") + 
   scale_color_manual(values = source_colours) + 
-  theme(legend.position = "none")
+  theme(
+    legend.position = "none", 
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+  )
 ```
-```{r time}
-scores_ty <- scores %>%
-  dplyr::group_by(source, time) %>%
-  dplyr::summarize(
-    bias = mean(mn - obs),
-    mae = mean(abs(mn - obs)), 
-    rmse = sqrt(mean((mn - obs)**2)), 
-    sd = mean(sd), 
-    crps = mean(crps), 
-    .groups = "drop"
-  ) %>% 
-  dplyr::mutate(
-    s2e = sd / rmse
-  ) %>%
-  dplyr::mutate(source = gsub("EMOS-v1.1", "EMOS_v1.1", source)) %>%
-  tidyr::separate(source, into = c("source", "model", "version"), sep = "_") %>%
-  dplyr::mutate(source_tag = paste(source, version)) 
 
-
-scores_ty %>%
-  tidyr::pivot_longer(-c(source_tag, source, model, version, time)) %>%
-  ggplot(aes(x = time, y = value, col = source_tag)) + 
-  geom_line() + 
-  facet_wrap(~ name, scales= "free_y", nrow = 3) + 
-  theme_light() + 
-  scale_color_manual(values = source_colours, name = "")
-```
 
