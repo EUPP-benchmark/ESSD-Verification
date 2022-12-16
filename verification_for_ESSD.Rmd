@@ -411,17 +411,17 @@ scores_mn %>%
 scores_mn %>%
   tidyr::pivot_longer(-c(source, step)) %>%
   dplyr::filter(name %in% c("bias", "crps", "s2e", "sd")) %>%
-  dplyr::mutate(name = renamer[name]) %>% 
+  dplyr::mutate(name = factor(renamer[name], c("CRPS", "Bias", "Ensemble spread", "Spread-error-ratio"))) %>% 
   ggplot(aes(x = step, y = value, col = source)) + 
   geom_hline(
-    data = dplyr::rename(gridlines, name = score) %>% 
+    data = dplyr::rename(gridlines, name = score) %>%
       dplyr::filter(name != "crpss") %>%
-      dplyr::mutate(name = renamer[name]) %>%
-      tidyr::drop_na(), 
+      dplyr::mutate(name = factor(renamer[name], c("CRPS", "Bias", "Ensemble spread", "Spread-error-ratio"))) %>%
+      tidyr::drop_na(),
     aes(yintercept = hline), lty = 2, col = grey(0.2)
-  ) + 
+  ) +
   geom_line() + 
-  facet_wrap(~ name, scales= "free_y", nrow = 3) + 
+  facet_wrap(~ name, labeller = label_wrap_gen2(width = 35), scales= "free_y", nrow = 3) + 
   scale_color_manual(values = source_colours, name = "") + 
   scale_x_continuous(breaks = seq(0, 120, 24)) + 
   labs(x = "Lead time (hours)", y = "") 
@@ -498,7 +498,7 @@ ranks %>%
   labs(x = "", y = "")
 ```
 
-```{r rank-histogram-paper, fig.height = 2, fig.width = 9}
+```{r rank-histogram-paper, fig.height = 2, fig.width = 10}
 ranks %>%
   # dplyr::filter(source != "ECMWF DMO") %>%
   dplyr::mutate(source = factor(source, names(source_colours))) %>%
@@ -506,7 +506,7 @@ ranks %>%
   geom_bar(stat = "identity") +
   scale_fill_manual(values = source_colours) + 
   scale_color_manual(values = source_colours) + 
-  facet_wrap(~source, nrow = 1) + 
+  facet_wrap(~source, labeller = label_wrap_gen2(width = 35), nrow = 1) + 
   coord_cartesian(ylim = c(0, 180000)) +
   geom_text(
     data = tibble(
@@ -578,7 +578,7 @@ submap %>%
     ylim = range(scores_map$latitude)
   ) + 
   geom_point(aes(fill = bias), pch = 21, size = 1.5, col = "grey") + 
-  facet_wrap(~source, nrow = 2) + 
+  facet_wrap(~source, labeller = label_wrap_gen2(width = 35), nrow = 2) + 
   scale_fill_gradientn(
     colors = hcl(h = c(240, 240, 240, 13, 13), l = c(10, 50, 100, 50, 10), c = c(20, 80, 0, 80, 20)), 
     values = colvalues
