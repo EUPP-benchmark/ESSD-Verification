@@ -5,6 +5,7 @@ date: "`r Sys.Date()`"
 output: 
   pdf_document:
     keep_md: true
+    dev: pdf
   html_document:
     code_folding: hide
 params:
@@ -81,7 +82,7 @@ methods_dict <- c(
   `Bielefeld-University_AR-EMOS_v1.1` = "AR-EMOS",
   `ECMWF_RepresentativnessWithBiasCorrection_test-v1.2` = "ASRE",
   `KIT_simple-NN_v1.1` = "DRN",
-  `MetOffice_IMPROVER-reliabilitycalibration-v1.3.1_v1.3` = "IMPROVER",
+  `MetOffice_IMPROVER-reliabilitycalibration-v1.3.1_v1.3` = "RC",
   `RMIB_Pythie-MBM-AbsCRPSmin-commit21a29a9_global-v1.0` = "MBM",
   `University-of-Hildesheim_D-Vine-Copula_v1.1` = "DVQR",
   `ZAMG_EMOS-v1.1` = "EMOS",
@@ -412,17 +413,18 @@ scores_mn %>%
   tidyr::pivot_longer(-c(source, step)) %>%
   dplyr::filter(name %in% c("bias", "crps", "s2e", "sd")) %>%
   dplyr::mutate(name = factor(renamer[name], c("CRPS", "Bias", "Ensemble spread", "Spread-error-ratio"))) %>% 
-  ggplot(aes(x = step, y = value, col = source)) + 
+  ggplot(aes(x = step, y = value, col = source, linetype = source)) + 
   geom_hline(
     data = dplyr::rename(gridlines, name = score) %>%
       dplyr::filter(name != "crpss") %>%
       dplyr::mutate(name = factor(renamer[name], c("CRPS", "Bias", "Ensemble spread", "Spread-error-ratio"))) %>%
       tidyr::drop_na(),
-    aes(yintercept = hline), lty = 2, col = grey(0.2)
+    aes(yintercept = hline), lty = 1, col = grey(0.2), size = 0.2
   ) +
   geom_line() + 
   facet_wrap(~ name, labeller = label_wrap_gen2(width = 35), scales= "free_y", nrow = 3) + 
   scale_color_manual(values = source_colours, name = "") + 
+  scale_linetype_manual(values = setNames(c(1,rep(1:2, 4)), names(source_colours)), name = "") + 
   scale_x_continuous(breaks = seq(0, 120, 24)) + 
   labs(x = "Lead time (hours)", y = "") 
 ```
@@ -498,7 +500,7 @@ ranks %>%
   labs(x = "", y = "")
 ```
 
-```{r rank-histogram-paper, fig.height = 2, fig.width = 10}
+```{r rank-histogram-paper, fig.height = 2, fig.width = 10.5}
 ranks %>%
   # dplyr::filter(source != "ECMWF DMO") %>%
   dplyr::mutate(source = factor(source, names(source_colours))) %>%
@@ -531,13 +533,12 @@ ranks %>%
     aes(x = x, xend = xend, y = y, yend = yend),
     arrow = arrow(length = unit(0.1, "cm"))
   ) +
+  geom_hline(yintercept = mean(filter(ranks, source == source[1])$n), size = 0.3, lty = 2) + 
   theme(
     legend.position = 'none', 
-    axis.text = element_blank(),
-    axis.ticks = element_blank(),
     panel.grid = element_blank()
   ) + 
-  labs(x = "", y = "")
+  labs(x = "Rank", y = "Count")
 ```
 
 ## Score maps
@@ -591,23 +592,35 @@ submap %>%
   theme(legend.position = c(0.85, 0.25))
 ```
 
-```{r map-crpss, fig.height = 7}
-scores_map %>%
+```{r map-crpss, fig.height = 5.5, fig.width = 7.5}
+submap <- scores_map %>%
   dplyr::select(station_id, longitude, latitude, source, crps) %>%
   tidyr::pivot_wider(names_from = "source", values_from = "crps") %>%
   tidyr::pivot_longer(
     -c(station_id, longitude, latitude, `ECMWF DMO`), 
     names_to = "source"
   ) %>%
-  dplyr::mutate(skill = 1 - value / `ECMWF DMO`) %>%
+  dplyr::mutate(skill = 1 - value / `ECMWF DMO`) 
+
+## set up 4 colours to control gradient through 0
+valrange <- range(submap$skill)
+n <- 9
+colvalues <- c(0, abs(valrange)[1] + seq(0, n) / n * valrange[2]) / diff(valrange)
+
+submap %>%  
   ggplot(aes(x = longitude, y = latitude)) + 
   borders(
     xlim = range(scores_map$longitude), 
     ylim = range(scores_map$latitude)
   ) + 
-  geom_point(aes(fill = skill), pch = 21, size = 2, col = 'grey') + 
-  facet_wrap(~source, ncol = 4) + 
-  scale_fill_gradient2(low = "purple", high = "darkgreen") + 
+  geom_point(aes(fill = skill, shape = skill > 0), size = 1.5, col = 'grey') + 
+  facet_wrap(~source, labeller = label_wrap_gen2(), ncol = 4) + 
+  scale_fill_gradientn(
+    colors = c(hcl(h = c(240, 0), l = c(20, 100), c = c(100, 0)), viridis_pal(direction = -1, option = 'A')(n)),
+    values = colvalues, 
+    name = "CRPSS"
+  ) +
+  scale_shape_manual(values = c(22,21), guide = "none") + 
   coord_fixed(
     ratio = 1/ cos(50/180*pi),
     xlim = range(scores_map$longitude), 
@@ -668,9 +681,9 @@ scores_map %>%
   )
 ```
 
-```{r scores-altitude-paper, fig.width = 12, fig.height = 8}
+```{r scores-altitude-paper, fig.width = 12, fig.height = 5.5}
 scores_map %>%
-  tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
+  tidyr::pivot_longer(c(bias, crps, s2e), names_to = "score") %>%
   dplyr::mutate(
     source = factor(source, names(source_colours)), 
     score = renamer[score]
@@ -678,20 +691,25 @@ scores_map %>%
   ggplot(aes(x = pmax(altitude, 0), y = value, col = source)) + 
   geom_point(alpha = 0.2) + 
   geom_hline(
-    data = gridlines %>% dplyr::mutate(score = renamer[score]) %>% tidyr::drop_na(), 
+    data = gridlines %>% dplyr::filter(score %in% c("bias", "crps", "s2e")) %>% dplyr::mutate(score = renamer[score]) %>% tidyr::drop_na(), 
     aes(yintercept = hline), 
     lty = 2, 
-    col = grey(0.2)
+    col = grey(0.2),
+    size = 0.3
   ) + 
   facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
-  labs(x = "Altitude of station", y = "") + 
+  labs(x = "Elevation of station", y = "") + 
   scale_color_manual(values = source_colours) + 
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
     legend.position = 'none'
   ) + 
   coord_trans(x = "sqrt") + 
-  scale_x_continuous(breaks = c(50, 200, 500, 1000, 2000, 3000)) 
+  scale_x_continuous(
+    breaks = c(100, 1000, 3000),
+    minor_breaks = NULL
+    # minor_breaks = c(100, 500, 1000, 2000, 3000),
+  ) 
 ```
 
 ```{r scores-altitude-difference, fig.width = 12, fig.height = 8}
