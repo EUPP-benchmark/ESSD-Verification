@@ -369,11 +369,11 @@ source_shapes <- setNames(
 sources <- unique(colours$source)
 
 renamer <- c(
-  bias = "Bias", 
-  crps = "CRPS",
+  bias = "Bias (K)", 
+  crps = "CRPS (K)",
   crpss = "CRPSS",
   s2e = "Spread-error-ratio", 
-  sd = "Ensemble spread")
+  sd = "Ensemble spread (K)")
 ```
 
 
@@ -681,7 +681,7 @@ scores_map %>%
   )
 ```
 
-```{r scores-altitude-paper, fig.width = 12, fig.height = 5.5}
+```{r figure6, fig.width = 12, fig.height = 5.5}
 scores_map %>%
   tidyr::pivot_longer(c(bias, crps, s2e), names_to = "score") %>%
   dplyr::mutate(
