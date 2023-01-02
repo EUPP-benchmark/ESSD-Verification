@@ -412,12 +412,12 @@ scores_mn %>%
 scores_mn %>%
   tidyr::pivot_longer(-c(source, step)) %>%
   dplyr::filter(name %in% c("bias", "crps", "s2e", "sd")) %>%
-  dplyr::mutate(name = factor(renamer[name], c("CRPS", "Bias", "Ensemble spread", "Spread-error-ratio"))) %>% 
+  dplyr::mutate(name = factor(renamer[name], c("CRPS (K)", "Bias (K)", "Ensemble spread (K)", "Spread-error-ratio"))) %>% 
   ggplot(aes(x = step, y = value, col = source, linetype = source)) + 
   geom_hline(
     data = dplyr::rename(gridlines, name = score) %>%
       dplyr::filter(name != "crpss") %>%
-      dplyr::mutate(name = factor(renamer[name], c("CRPS", "Bias", "Ensemble spread", "Spread-error-ratio"))) %>%
+      dplyr::mutate(name = factor(renamer[name], c("CRPS (K)", "Bias (K)", "Ensemble spread (K)", "Spread-error-ratio"))) %>%
       tidyr::drop_na(),
     aes(yintercept = hline), lty = 1, col = grey(0.2), size = 0.2
   ) +
