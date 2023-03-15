@@ -75,24 +75,33 @@ Before you load the data, please make sure that your path points to the director
 
 ```{r data}
 ## set the path to your data directory
+# path <- "data/v0.1"
+# methods_dict <- c(
+#   `ARSO_ANET_v1.0` = "ANET",
+#   `Bielefeld-University_AR-EMOS_v1.1` = "AR-EMOS",
+#   `ECMWF_RepresentativnessWithBiasCorrection_test-v1.2` = "ASRE",
+#   `KIT_simple-NN_v1.1` = "DRN",
+#   `MetOffice_IMPROVER-reliabilitycalibration-v1.3.1_v1.3` = "RC",
+#   `RMIB_Pythie-MBM-AbsCRPSmin-commit21a29a9_global-v1.0` = "MBM",
+#   `University-of-Hildesheim_D-Vine-Copula_v1.1` = "DVQR",
+#   `ZAMG_EMOS-v1.1` = "EMOS",
+#   `test_data_forecasts` = "ECMWF DMO" 
+# )
+
 path <- "data/v1.0"
-
-obsfile <- list.files(path, "observations.nc", full.names = TRUE)
-
 methods_dict <- c(
   `ARSO_ANET_v1.0` = "ANET",
   `Bielefeld-University_AR-EMOS_v1.1` = "AR-EMOS",
-  # `ECMWF_RepresentativnessWithBiasCorrection_test-v1.2` = "ASRE",
   `ECMWF_RepresentativnessWithBiasCorrection_test-v1.1` = "ASRE",
   `KIT_simple-NN_v1.1` = "DRN",
-  # `MetOffice_IMPROVER-reliabilitycalibration-v1.3.1_v1.3` = "RC",
   `MetOffice_IMPROVER-reliabilitycalibration-v1.3.1_v1.4` = "RC",
   `RMIB_Pythie-MBM-AbsCRPSmin-commit21a29a9_global-v1.0` = "MBM",
-  # `University-of-Hildesheim_D-Vine-Copula_v1.1` = "DVQR",
   `University-of-Hildesheim_D-Vine-Copula_v1.0` = "DVQR",
   `ZAMG_EMOS-v1.1` = "EMOS",
-  `test_data_forecasts` = "ECMWF DMO" 
+  `test_data_forecasts` = "ECMWF DMO"
 )
+
+obsfile <- list.files(path, "observations.nc", full.names = TRUE)
 
 fcfiles <- paste0(
   path, 
@@ -358,6 +367,7 @@ aggregate_scores <- function(df) {
       se = sd(mn - obs),
       sd = mean(sd), 
       crps = mean(crps), 
+      n = dplyr::n(),
       .groups = "drop"
     ) %>% 
     dplyr::mutate(
