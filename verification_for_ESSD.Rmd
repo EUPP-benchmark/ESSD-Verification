@@ -518,18 +518,7 @@ scores_mn %>%
 scores_ty <- scores %>%
   dplyr::mutate(yearmonth = lubridate::floor_date(time, "month")) %>%
   dplyr::group_by(source, yearmonth) %>%
-  dplyr::summarize(
-    bias = mean(mn - obs),
-    mae = mean(abs(mn - obs)), 
-    rmse = sqrt(mean((mn - obs)**2)), 
-    sd = mean(sd), 
-    crps = mean(crps), 
-    n = n(),
-    .groups = "drop"
-  ) %>% 
-  dplyr::mutate(
-    s2e = sd / rmse
-  ) 
+  aggregate_scores()
 
 
 scores_ty %>%
@@ -747,9 +736,56 @@ scores_map %>%
   )
 ```
 
+```{r scores-altitude-revised, fig.width = 12, fig.height = 8}
+scores_map %>%
+  tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e2), names_to = "score") %>%
+  dplyr::mutate(source = factor(source, names(source_colours))) %>%
+  ggplot(aes(x = altitude, y = value, col = source)) + 
+  geom_point(alpha = 0.3) + 
+  geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
+  scale_color_manual(values = source_colours) + 
+  labs(x = "Altitude of station", y = "") + 
+  theme(
+    legend.position = "none", 
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+  )
+```
+
 ```{r figure6, fig.width = 12, fig.height = 5.5}
 scores_map %>%
   tidyr::pivot_longer(c(bias, crps, s2e), names_to = "score") %>%
+  dplyr::mutate(
+    source = factor(source, names(source_colours)), 
+    score = renamer[score]
+  ) %>%
+  ggplot(aes(x = pmax(altitude, 0), y = value, col = source)) + 
+  geom_point(alpha = 0.2) + 
+  geom_hline(
+    data = gridlines %>% dplyr::filter(score %in% c("bias", "crps", "s2e")) %>% dplyr::mutate(score = renamer[score]) %>% tidyr::drop_na(), 
+    aes(yintercept = hline), 
+    lty = 2, 
+    col = grey(0.2),
+    size = 0.3
+  ) + 
+  facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
+  labs(x = "Elevation of station", y = "") + 
+  scale_color_manual(values = source_colours) + 
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+    legend.position = 'none'
+  ) + 
+  coord_trans(x = "sqrt") + 
+  scale_x_continuous(
+    breaks = c(100, 1000, 3000),
+    minor_breaks = NULL
+    # minor_breaks = c(100, 500, 1000, 2000, 3000),
+  ) 
+```
+
+```{r figure6-revised, fig.width = 12, fig.height = 5.5}
+scores_map %>%
+  tidyr::pivot_longer(c(bias, crps, s2e2), names_to = "score") %>%
   dplyr::mutate(
     source = factor(source, names(source_colours)), 
     score = renamer[score]
@@ -793,6 +829,21 @@ scores_map %>%
   )
 ```
 
+```{r scores-altitude-difference-revised, fig.width = 12, fig.height = 8}
+scores_map %>%
+  tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e2), names_to = "score") %>%
+  ggplot(aes(x = altitude - orography, y = value, col = source)) + 
+  geom_point(alpha = 0.3) + 
+  geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
+  scale_color_manual(values = source_colours) + 
+  labs(x = "Difference between station altitude and model orography", y = "") + 
+  theme(
+    legend.position = "none", 
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+  )
+```
+
 ```{r scores-missing, fig.width = 12, fig.height = 8}
 scores_map %>%
   tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
@@ -808,9 +859,39 @@ scores_map %>%
   )
 ```
 
+```{r scores-missing-revised, fig.width = 12, fig.height = 8}
+scores_map %>%
+  tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e2), names_to = "score") %>%
+  ggplot(aes(x = percentage_missing, y = value, col = source)) + 
+  geom_point(alpha = 0.3) + 
+  geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
+  labs(x = "Percentage of missing values", y = "") + 
+  scale_color_manual(values = source_colours) + 
+  theme(
+    legend.position = "none", 
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+  )
+```
+
 ```{r scores-training, fig.width = 12, fig.height = 8}
 scores_map %>%
   tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
+  ggplot(aes(x = fraction_available, y = value, col = source)) + 
+  geom_point(alpha = 0.3) + 
+  geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
+  labs(x = "Fraction of observations in training set", y = "") + 
+  scale_color_manual(values = source_colours) + 
+  theme(
+    legend.position = "none", 
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)
+  )
+```
+
+```{r scores-training-revised, fig.width = 12, fig.height = 8}
+scores_map %>%
+  tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e2), names_to = "score") %>%
   ggplot(aes(x = fraction_available, y = value, col = source)) + 
   geom_point(alpha = 0.3) + 
   geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
