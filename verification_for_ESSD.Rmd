@@ -60,8 +60,8 @@ label_wrap_gen2 <- function(width = 18) {
 }
 
 gridlines <- tibble::tibble(
-  score = c("bias", "crpss", "s2e", "crps", "sd"),
-  hline = c(0, 0, 1, NA, NA)
+  score = c("bias", "crpss", "s2e", "s2e2", "crps", "sd"),
+  hline = c(0, 0, 1, 1, NA, NA)
 )
 
 ```
@@ -85,13 +85,13 @@ Before you load the data, please make sure that your path points to the director
 #   `RMIB_Pythie-MBM-AbsCRPSmin-commit21a29a9_global-v1.0` = "MBM",
 #   `University-of-Hildesheim_D-Vine-Copula_v1.1` = "DVQR",
 #   `ZAMG_EMOS-v1.1` = "EMOS",
-#   `test_data_forecasts` = "ECMWF DMO" 
+#   `test_data_forecasts` = "ECMWF DMO"
 # )
 
 path <- "data/v1.0"
 methods_dict <- c(
   `ARSO_ANET_v1.0` = "ANET",
-  `Bielefeld-University_AR-EMOS_v1.1` = "AR-EMOS",
+  `Bielefeld-University_AR-EMOS_v1.2` = "AR-EMOS",
   `ECMWF_RepresentativnessWithBiasCorrection_test-v1.1` = "ASRE",
   `KIT_simple-NN_v1.1` = "DRN",
   `MetOffice_IMPROVER-reliabilitycalibration-v1.3.1_v1.4` = "RC",
@@ -448,7 +448,7 @@ map_cor
 ## Scores by lead time
 We start with a plot of scores by lead time.
 
-```{r leadtime}
+```{r leadtime, fig.cap = "Average scores in dependence of lead time"}
 scores_mn %>%
   tidyr::pivot_longer(-c(source, step)) %>%
   ggplot(aes(x = step, y = value, col = source)) + 
@@ -463,7 +463,7 @@ scores_mn %>%
   labs(x = "Lead time (hours)", y = "")
 ```
 
-```{r figure3, fig.width = 8, fig.height = 4}
+```{r figure3, fig.width = 8, fig.height = 4, fig.cap = "Average scores in dependence of forecast lead time"}
 scores_mn %>%
   tidyr::pivot_longer(-c(source, step)) %>%
   dplyr::filter(name %in% c("bias", "crps", "s2e", "sd")) %>%
@@ -471,7 +471,7 @@ scores_mn %>%
   ggplot(aes(x = step, y = value, col = source, linetype = source)) + 
   geom_hline(
     data = dplyr::rename(gridlines, name = score) %>%
-      dplyr::filter(name != "crpss") %>%
+      dplyr::filter(!name %in% c("crpss", "s2e2")) %>%
       dplyr::mutate(name = factor(renamer[name], renamer)) %>%
       tidyr::drop_na(),
     aes(yintercept = hline), lty = 1, col = grey(0.2), size = 0.2
@@ -484,7 +484,7 @@ scores_mn %>%
   labs(x = "Lead time (hours)", y = "") 
 ```
 
-```{r figure3-revised, fig.width = 8, fig.height = 4}
+```{r figure3-revised, fig.width = 8, fig.height = 4, fig.cap = "Average scores in dependence of forecast lead time"}
 scores_mn %>%
   tidyr::pivot_longer(-c(source, step)) %>%
   dplyr::filter(name %in% c("bias", "crps", "s2e2", "sd")) %>%
@@ -492,7 +492,7 @@ scores_mn %>%
   ggplot(aes(x = step, y = value, col = source, linetype = source)) + 
   geom_hline(
     data = dplyr::rename(gridlines, name = score) %>%
-      dplyr::filter(name != "crpss") %>%
+      dplyr::filter(!name %in% c("crpss", "s2e")) %>%
       dplyr::mutate(name = factor(renamer[name], renamer)) %>%
       tidyr::drop_na(),
     aes(yintercept = hline), lty = 1, col = grey(0.2), size = 0.2
@@ -506,7 +506,7 @@ scores_mn %>%
 ```
 
 
-```{r leadtime-skill}
+```{r leadtime-skill, fig.cap = "Skill score in dependence of forecast lead time."}
 scores_mn %>%
   tidyr::pivot_longer(-c(source, step)) %>%
   tidyr::pivot_wider(names_from = source, values_from = value) %>%
@@ -524,7 +524,7 @@ scores_mn %>%
 
 ## Scores by valid time
 
-```{r time}
+```{r time, fig.cap = "Average score in dependence of forecast initialization time."}
 scores_ty <- scores %>%
   dplyr::mutate(yearmonth = lubridate::floor_date(time, "month")) %>%
   dplyr::group_by(source, yearmonth) %>%
@@ -565,7 +565,7 @@ ranks %>%
   labs(x = "", y = "")
 ```
 
-```{r figure4, fig.height = 2, fig.width = 10.5}
+```{r figure4, fig.height = 2, fig.width = 10.5, fig.cap = "Rank histogram of forecasts submitted to the benchmark experiment. Please note that the visualization for ECMWF DMO is clipped for better comparison with the rank histograms of the postprocessed forecasts."}
 ranks %>%
   # dplyr::filter(source != "ECMWF DMO") %>%
   dplyr::mutate(source = factor(source, names(source_colours))) %>%
@@ -609,7 +609,7 @@ ranks %>%
 ## Score maps
 A map of the bias can be produced as follows.
 
-```{r map-bias, fig.height = 7}
+```{r map-bias, fig.height = 7, fig.cap = "Mean bias of forecasts in Kelvin."}
 scores_map %>%
   #dplyr::filter(source != "ECMWF DMO") %>%
   ggplot(aes(x = longitude, y = latitude)) + 
@@ -628,7 +628,7 @@ scores_map %>%
   theme(legend.position = c(0.85, 0.25))
 ```
 
-```{r map-bias-paper, fig.height = 5.5, fig.width = 8}
+```{r map-bias-paper, fig.height = 5.5, fig.width = 8, fig.cap = "Mean bias of forecasts in Kelvin."}
 # submap <- scores_map %>%
 #   dplyr::filter(source != "ECMWF DMO") 
 submap <- scores_map
@@ -657,7 +657,7 @@ submap %>%
   theme(legend.position = c(0.85, 0.25))
 ```
 
-```{r figure5, fig.height = 5.5, fig.width = 7.5}
+```{r figure5, fig.height = 5.5, fig.width = 7.5, fig.cap = "Continuous Ranked Probability Skill Score (CRPSS) with respect to ECMWF DMO. Positive values indicate that the postprocessing outperform the ECMWF DMO ensemble forecasts, negative skill values are marked with square symbols."}
 submap <- scores_map %>%
   dplyr::select(station_id, longitude, latitude, source, crps) %>%
   tidyr::pivot_wider(names_from = "source", values_from = "crps") %>%
@@ -736,7 +736,7 @@ scores_map %>%
   dplyr::mutate(source = factor(source, names(source_colours))) %>%
   ggplot(aes(x = altitude, y = value, col = source)) + 
   geom_point(alpha = 0.3) + 
-  geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  geom_hline(data = gridlines %>% dplyr::filter(score != "s2e2") %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
   facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
   scale_color_manual(values = source_colours) + 
   labs(x = "Altitude of station", y = "") + 
@@ -752,7 +752,7 @@ scores_map %>%
   dplyr::mutate(source = factor(source, names(source_colours))) %>%
   ggplot(aes(x = altitude, y = value, col = source)) + 
   geom_point(alpha = 0.3) + 
-  geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  geom_hline(data = gridlines %>% dplyr::filter(score != "s2e") %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
   facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
   scale_color_manual(values = source_colours) + 
   labs(x = "Altitude of station", y = "") + 
@@ -762,7 +762,7 @@ scores_map %>%
   )
 ```
 
-```{r figure6, fig.width = 12, fig.height = 5.5}
+```{r figure6, fig.width = 12, fig.height = 5.5, fig.cap = "Average scores by station in dependence of station elevation, the elevation-corrected ECMWF DMO is shown alongside the results from the postprocessing methods submitted to the benchmark experiment."}
 scores_map %>%
   tidyr::pivot_longer(c(bias, crps, s2e), names_to = "score") %>%
   dplyr::mutate(
@@ -793,7 +793,7 @@ scores_map %>%
   ) 
 ```
 
-```{r figure6-revised, fig.width = 12, fig.height = 5.5}
+```{r figure6-revised, fig.width = 12, fig.height = 5.5, fig.cap = "Average scores by station in dependence of station elevation, the elevation-corrected ECMWF DMO is shown alongside the results from the postprocessing methods submitted to the benchmark experiment."}
 scores_map %>%
   tidyr::pivot_longer(c(bias, crps, s2e2), names_to = "score") %>%
   dplyr::mutate(
@@ -803,7 +803,7 @@ scores_map %>%
   ggplot(aes(x = pmax(altitude, 0), y = value, col = source)) + 
   geom_point(alpha = 0.2) + 
   geom_hline(
-    data = gridlines %>% dplyr::filter(score %in% c("bias", "crps", "s2e")) %>% dplyr::mutate(score = renamer[score]) %>% tidyr::drop_na(), 
+    data = gridlines %>% dplyr::filter(score %in% c("bias", "crps", "s2e2")) %>% dplyr::mutate(score = renamer[score]) %>% tidyr::drop_na(), 
     aes(yintercept = hline), 
     lty = 2, 
     col = grey(0.2),
@@ -829,7 +829,7 @@ scores_map %>%
   tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
   ggplot(aes(x = altitude - orography, y = value, col = source)) + 
   geom_point(alpha = 0.3) + 
-  geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  geom_hline(data = gridlines %>% dplyr::filter(score != "s2e2") %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
   facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
   scale_color_manual(values = source_colours) + 
   labs(x = "Difference between station altitude and model orography", y = "") + 
@@ -844,7 +844,7 @@ scores_map %>%
   tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e2), names_to = "score") %>%
   ggplot(aes(x = altitude - orography, y = value, col = source)) + 
   geom_point(alpha = 0.3) + 
-  geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  geom_hline(data = gridlines %>% dplyr::filter(score != "s2e") %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
   facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
   scale_color_manual(values = source_colours) + 
   labs(x = "Difference between station altitude and model orography", y = "") + 
@@ -859,7 +859,7 @@ scores_map %>%
   tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
   ggplot(aes(x = percentage_missing, y = value, col = source)) + 
   geom_point(alpha = 0.3) + 
-  geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  geom_hline(data = gridlines %>% dplyr::filter(score != "s2e2") %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
   facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
   labs(x = "Percentage of missing values", y = "") + 
   scale_color_manual(values = source_colours) + 
@@ -874,7 +874,7 @@ scores_map %>%
   tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e2), names_to = "score") %>%
   ggplot(aes(x = percentage_missing, y = value, col = source)) + 
   geom_point(alpha = 0.3) + 
-  geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  geom_hline(data = gridlines %>% dplyr::filter(score != "s2e") %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
   facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
   labs(x = "Percentage of missing values", y = "") + 
   scale_color_manual(values = source_colours) + 
@@ -889,7 +889,7 @@ scores_map %>%
   tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e), names_to = "score") %>%
   ggplot(aes(x = fraction_available, y = value, col = source)) + 
   geom_point(alpha = 0.3) + 
-  geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  geom_hline(data = gridlines %>% dplyr::filter(score != "s2e2") %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
   facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
   labs(x = "Fraction of observations in training set", y = "") + 
   scale_color_manual(values = source_colours) + 
@@ -904,7 +904,7 @@ scores_map %>%
   tidyr::pivot_longer(c(bias, crps, crpss, sd, s2e2), names_to = "score") %>%
   ggplot(aes(x = fraction_available, y = value, col = source)) + 
   geom_point(alpha = 0.3) + 
-  geom_hline(data = gridlines %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
+  geom_hline(data = gridlines %>% dplyr::filter(score != "s2e") %>% tidyr::drop_na(), aes(yintercept = hline), lty = 2, col = grey(0.2)) + 
   facet_grid(score ~ source, scales = "free_y", labeller = label_wrap_gen(width = 18)) + 
   labs(x = "Fraction of observations in training set", y = "") + 
   scale_color_manual(values = source_colours) + 
