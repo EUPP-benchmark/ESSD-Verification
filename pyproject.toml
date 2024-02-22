@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "ESSD-verification"
+version = "0.1.0"
+authors = ["Jonas Bhend <jonas.bhend@meteoswiss.ch>"]
+description = "Python scripts to download EUPPbench data"
+
+[[tool.poetry.source]]
+name = "meteoswiss"
+url = "https://hub.meteoswiss.ch/nexus/repository/python-all/simple"
+priority = "default"
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.11"
+xarray = "^2024.1.1"
+climetlab = "^0.20.11"
+climetlab-eumetnet-postprocessing-benchmark = "^0.2.5"

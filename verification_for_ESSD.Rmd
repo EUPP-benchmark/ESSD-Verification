@@ -6,6 +6,8 @@ output:
   pdf_document:
     keep_md: true
     dev: pdf
+    includes:
+      in_header: 'gt_packages.sty'
   html_document:
     code_folding: hide
 params:
@@ -282,23 +284,30 @@ stats <- sapply(significance$stats, function(x) x["p.value",,], simplify = "arra
 stats[is.na(stats)] <- 0.5
 out <- round(rowMeans(stats < 0.05, dims = 2) * 100, 1)
 
-out %>% 
+gt_table <- out %>% 
   (function(x) { x[x == 0] <- NA ; x }) %>%
   as.data.frame() %>% 
   dplyr::mutate(rowname = rownames(out)) %>%
   gt(caption = "Percentage of station / lead time combinations for which the forecast denoted in the row performs significantly (at 5% level) better as measured by the CRPS than the forecast denoted in the column.") %>%
   gt_hulk_col_numeric(domain = c(0, 100))
+
+gtsave(gt_table, file = "verification_for_ESSD_files/figure-latex/figure_a1_noBH.pdf")
+gt_table
 ```
 ```{r benjamini-hochberg}
 stats.adjusted <- apply(stats, 1:2, p.adjust, method = "BH")
 out.adjusted <- round(colMeans(stats.adjusted < 0.05, dims = 1) * 100, 1)
 
-out.adjusted %>% 
+gt_table <- out.adjusted %>% 
   (function(x) { x[x == 0] <- NA ; x }) %>%
   as.data.frame() %>% 
   dplyr::mutate(rowname = rownames(out.adjusted)) %>%
   gt(caption = "Percentage of station / lead time combinations for which the forecast denoted in the row performs significantly (at 5% level) better as measured by the CRPS than the forecast denoted in the column. The p-values have been adjusted for multiple testing using the Benjamini-Hochberg correction.") %>%
   gt_hulk_col_numeric(domain = c(0, 100))
+
+gtsave(gt_table, file = "verification_for_ESSD_files/figure-latex/figure_a1.pdf")
+
+gt_table
 ```
 
 
@@ -379,6 +388,8 @@ aggregate_scores <- function(df) {
 scores_mn <- scores %>%
   dplyr::group_by(source, step) %>%
   aggregate_scores()
+
+saveRDS(scores_mn, "scores_mn.rds")
 
 scores_map <-  scores %>%
   dplyr::group_by(source, station_id) %>%

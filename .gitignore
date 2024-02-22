@@ -38,6 +38,8 @@ verification*.md
 *.tex
 *_files
 *.pdf
+*.png
+*.rds
 
 # R Environment Variables
 .Renviron
